@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Digital Twin — Earth</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="loading-screen">
+    <div class="loader-content">
+      <div class="loader-ring"></div>
+      <h2>Earth Digital Twin</h2>
+      <p id="load-status">Initializing…</p>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    </div>
+  </div>
+
+  <div id="globe-container"></div>
+
+  <div id="controls-panel">
+    <h3>Layers</h3>
+    <label class="toggle-row">
+      <span>Cloud Cover</span>
+      <input type="checkbox" id="toggle-clouds" checked>
+      <span class="toggle-switch"></span>
+    </label>
+    <label class="toggle-row">
+      <span>Flight Traffic</span>
+      <input type="checkbox" id="toggle-flights">
+      <span class="toggle-switch"></span>
+    </label>
+    <label class="toggle-row">
+      <span>Night Mode</span>
+      <input type="checkbox" id="toggle-night">
+      <span class="toggle-switch"></span>
+    </label>
+    <label class="toggle-row">
+      <span>Country Borders</span>
+      <input type="checkbox" id="toggle-borders" checked>
+      <span class="toggle-switch"></span>
+    </label>
+    <label class="toggle-row">
+      <span>Atmosphere</span>
+      <input type="checkbox" id="toggle-atmosphere" checked>
+      <span class="toggle-switch"></span>
+    </label>
+  </div>
+
+  <div id="country-popup" class="hidden">
+    <div class="popup-header">
+      <span id="popup-flag"></span>
+      <h4 id="popup-name"></h4>
+    </div>
+    <div class="popup-stats">
+      <div class="stat-row"><span class="stat-label">Capital</span><span class="stat-value" id="popup-capital"></span></div>
+      <div class="stat-row"><span class="stat-label">Population</span><span class="stat-value" id="popup-population"></span></div>
+      <div class="stat-row"><span class="stat-label">Area</span><span class="stat-value" id="popup-area"></span></div>
+      <div class="stat-row"><span class="stat-label">GDP</span><span class="stat-value" id="popup-gdp"></span></div>
+      <div class="stat-row"><span class="stat-label">Region</span><span class="stat-value" id="popup-region"></span></div>
+    </div>
+  </div>
+
+  <div id="zoom-indicator">
+    <span id="zoom-level">Zoom: 1.0×</span>
+  </div>
+
+  <div id="info-bar">
+    <span id="coords-display">Lat: 0.00° Lon: 0.00°</span>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

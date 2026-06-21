@@ -1,0 +1,115 @@
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0e17;
+  --card: rgba(12, 18, 32, 0.92);
+  --border: rgba(80, 140, 255, 0.18);
+  --accent: #4d9fff;
+  --accent-glow: rgba(77, 159, 255, 0.3);
+  --text: #e0e8f5;
+  --text-dim: #8899b8;
+  --success: #34d399;
+  --font: 'Inter', system-ui, sans-serif;
+}
+
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--font); color: var(--text); }
+
+#globe-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
+/* Loading */
+#loading-screen {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+#loading-screen.fade-out { opacity: 0; visibility: hidden; }
+
+.loader-content { text-align: center; }
+.loader-content h2 { font-weight: 300; font-size: 1.8rem; letter-spacing: 0.15em; margin-bottom: 0.5rem; color: var(--accent); }
+.loader-content p { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.2rem; }
+
+.loader-ring {
+  width: 64px; height: 64px; margin: 0 auto 1.5rem;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-bar { width: 220px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 0 auto; }
+.progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s ease; }
+
+/* Controls panel */
+#controls-panel {
+  position: fixed; top: 20px; right: 20px; z-index: 100;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px 20px; min-width: 200px;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+#controls-panel h3 {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.15em;
+  color: var(--text-dim); margin-bottom: 14px; font-weight: 500;
+}
+
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; cursor: pointer; font-size: 0.85rem; user-select: none;
+}
+.toggle-row span:first-child { flex: 1; }
+.toggle-row input { display: none; }
+
+.toggle-switch {
+  width: 36px; height: 20px; background: rgba(255,255,255,0.1);
+  border-radius: 10px; position: relative; transition: background 0.25s ease;
+  flex-shrink: 0; margin-left: 10px;
+}
+.toggle-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-dim); transition: all 0.25s ease;
+}
+.toggle-row input:checked + .toggle-switch { background: var(--accent); }
+.toggle-row input:checked + .toggle-switch::after {
+  transform: translateX(16px); background: #fff;
+}
+
+/* Country popup */
+#country-popup {
+  position: fixed; z-index: 200;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px; min-width: 240px;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+#country-popup.hidden { opacity: 0; visibility: hidden; }
+
+.popup-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.popup-header h4 { font-size: 1rem; font-weight: 600; }
+#popup-flag { font-size: 1.4rem; }
+
+.stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.82rem; }
+.stat-label { color: var(--text-dim); }
+.stat-value { font-weight: 500; text-align: right; }
+
+/* Zoom indicator */
+#zoom-indicator {
+  position: fixed; bottom: 20px; left: 20px; z-index: 100;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; font-size: 0.78rem;
+  backdrop-filter: blur(12px);
+}
+#zoom-level { color: var(--accent); font-weight: 500; }
+
+/* Info bar */
+#info-bar {
+  position: fixed; bottom: 20px; right: 20px; z-index: 100;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; font-size: 0.78rem;
+  backdrop-filter: blur(12px); color: var(--text-dim);
+}
+
+/* Starfield background */
+canvas { display: block; }
