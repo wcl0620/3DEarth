@@ -443,20 +443,67 @@ function processGeoJsonCountries(geojson) {
 }
 
 function buildCountryGrid() {
-  // Initialize grid: each cell stores an array of feature indices
-  // We'll rasterize each country's polygons into the grid
   countryGrid = new Int16Array(GRID_LAT_SIZE * GRID_LON_SIZE).fill(-1);
+
+  // First pass: rasterize all polygons, allowing multiple claims per cell
+  // We store all claimants per cell, then resolve to the best match
+  const claims = new Array(GRID_LAT_SIZE * GRID_LON_SIZE);
+  for (let i = 0; i < claims.length; i++) claims[i] = [];
 
   for (let fi = 0; fi < geoJsonFeatures.length; fi++) {
     const feature = geoJsonFeatures[fi];
     for (const polygon of feature.polygons) {
-      rasterizePolygon(polygon, fi);
+      rasterizePolygon(polygon, fi, claims);
     }
+  }
+
+  // Resolve: for each cell with multiple claims, pick the country whose
+  // polygon centroid is closest to the cell center
+  for (let i = 0; i < claims.length; i++) {
+    if (claims[i].length === 0) continue;
+    if (claims[i].length === 1) {
+      countryGrid[i] = claims[i][0];
+      continue;
+    }
+    // Multiple claims: pick the feature with smallest polygon area
+    let bestFi = claims[i][0];
+    let bestArea = Infinity;
+    const li = Math.floor(i / GRID_LON_SIZE);
+    const lo = i % GRID_LON_SIZE;
+    const cellLat = li - 90 + 0.5;
+    const cellLon = lo - 180 + 0.5;
+    for (const fi of claims[i]) {
+      const d = distToCentroid(geoJsonFeatures[fi], cellLat, cellLon);
+      if (d < bestArea) { bestArea = d; bestFi = fi; }
+    }
+    countryGrid[i] = bestFi;
   }
 }
 
-function rasterizePolygon(ring, featureIdx) {
-  // Find bounding box
+function distToCentroid(feature, lat, lon) {
+  // Compute centroid of all polygons, then angular distance to (lat, lon)
+  let cx = 0, cy = 0, cz = 0, count = 0;
+  for (const ring of feature.polygons) {
+    for (const [lo, la] of ring) {
+      const phi = la * Math.PI / 180;
+      const theta = lo * Math.PI / 180;
+      cx += Math.cos(phi) * Math.cos(theta);
+      cy += Math.cos(phi) * Math.sin(theta);
+      cz += Math.sin(phi);
+      count++;
+    }
+  }
+  cx /= count; cy /= count; cz /= count;
+  const phi = lat * Math.PI / 180;
+  const theta = lon * Math.PI / 180;
+  const px = Math.cos(phi) * Math.cos(theta);
+  const py = Math.cos(phi) * Math.sin(theta);
+  const pz = Math.sin(phi);
+  // Angular distance (lower = closer)
+  return 1 - (cx * px + cy * py + cz * pz);
+}
+
+function rasterizePolygon(ring, featureIdx, claims) {
   let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
   for (const [lon, lat] of ring) {
     if (lat < minLat) minLat = lat;
@@ -465,7 +512,6 @@ function rasterizePolygon(ring, featureIdx) {
     if (lon > maxLon) maxLon = lon;
   }
 
-  // Check for antimeridian crossing: if longitude span > 180, it wraps
   const crossesAntimeridian = (maxLon - minLon) > 180;
 
   const latStart = Math.max(0, Math.floor(minLat + 90));
@@ -473,7 +519,6 @@ function rasterizePolygon(ring, featureIdx) {
   let lonStart, lonEnd;
 
   if (crossesAntimeridian) {
-    // Polygon wraps around: test [minLon..180] and [-180..maxLon]
     lonStart = 0;
     lonEnd = GRID_LON_SIZE - 1;
   } else {
@@ -485,26 +530,74 @@ function rasterizePolygon(ring, featureIdx) {
     for (let lo = lonStart; lo <= lonEnd; lo++) {
       const lat = li - 90 + 0.5;
       const lon = lo - 180 + 0.5;
-      if (countryGrid[li * GRID_LON_SIZE + lo] !== -1) continue; // already claimed
-      if (pointInPolygon(lon, lat, ring)) {
-        countryGrid[li * GRID_LON_SIZE + lo] = featureIdx;
+      const idx = li * GRID_LON_SIZE + lo;
+      if (pointInPolygonSpherical(lat, lon, ring)) {
+        if (!claims[idx].includes(featureIdx)) {
+          claims[idx].push(featureIdx);
+        }
       }
     }
   }
 }
 
-// ── Point-in-polygon (ray casting) ─────────────────────────────────────────
-function pointInPolygon(lon, lat, ring) {
-  let inside = false;
+// ── Spherical point-in-polygon ─────────────────────────────────────────────
+// Uses 3D ray casting on the unit sphere. Converts all points to Cartesian,
+// then counts how many times a great-circle arc from the test point to a
+// fixed reference direction crosses the polygon boundary.
+function pointInPolygonSpherical(lat, lon, ring) {
   const n = ring.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1];
-    const xj = ring[j][0], yj = ring[j][1];
-    if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-      inside = !inside;
-    }
+  if (n < 3) return false;
+
+  // Convert test point to unit vector
+  const pLat = lat * Math.PI / 180;
+  const pLon = lon * Math.PI / 180;
+  const px = Math.cos(pLat) * Math.cos(pLon);
+  const py = Math.cos(pLat) * Math.sin(pLon);
+  const pz = Math.sin(pLat);
+
+  // Convert polygon vertices to unit vectors
+  const verts = [];
+  for (let i = 0; i < n; i++) {
+    const vLon = ring[i][0] * Math.PI / 180;
+    const vLat = ring[i][1] * Math.PI / 180;
+    verts.push([
+      Math.cos(vLat) * Math.cos(vLon),
+      Math.cos(vLat) * Math.sin(vLon),
+      Math.sin(vLat)
+    ]);
   }
-  return inside;
+
+  // Use winding number on the tangent plane at the test point
+  // Project all polygon vertices onto the tangent plane at p,
+  // then use 2D winding number.
+  // Tangent basis vectors at p:
+  //   e1 = (-sin(pLon), cos(pLon), 0)  (east)
+  //   e2 = (-sin(pLat)*cos(pLon), -sin(pLat)*sin(pLon), cos(pLat))  (north)
+  const e1x = -Math.sin(pLon), e1y = Math.cos(pLon), e1z = 0;
+  const e2x = -Math.sin(pLat) * Math.cos(pLon);
+  const e2y = -Math.sin(pLat) * Math.sin(pLon);
+  const e2z = Math.cos(pLat);
+
+  // Project and compute 2D winding number
+  let winding = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    // Vector from p to vertex
+    const dxi = verts[i][0] - px, dyi = verts[i][1] - py, dzi = verts[i][2] - pz;
+    const dxj = verts[j][0] - px, dyj = verts[j][1] - py, dzj = verts[j][2] - pz;
+    // Project onto tangent plane
+    const xi = dxi * e1x + dyi * e1y + dzi * e1z;
+    const yi = dxi * e2x + dyi * e2y + dzi * e2z;
+    const xj = dxj * e1x + dyj * e1y + dzj * e1z;
+    const yj = dxj * e2x + dyj * e2y + dzj * e2z;
+    // Accumulate angle
+    const cross = xi * yj - xj * yi;
+    const dot = xi * xj + yi * yj;
+    winding += Math.atan2(cross, dot);
+  }
+
+  // Winding number ≈ 2π if inside, ≈ 0 if outside
+  return Math.abs(winding) > Math.PI;
 }
 
 function findCountryAt(lat, lon) {
