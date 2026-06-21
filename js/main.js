@@ -20,6 +20,12 @@ const countryData = {};
 let geoJsonFeatures = [];
 const loadProgress = { textures: 0, geojson: 0, total: 2 };
 
+// Country lookup grid: maps [lat_idx][lon_idx] -> feature index
+const GRID_STEP = 1; // 1 degree resolution
+const GRID_LAT_SIZE = 180;
+const GRID_LON_SIZE = 360;
+let countryGrid = null;
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 init();
 
@@ -33,7 +39,6 @@ async function init() {
   createEarth();
   createAtmosphere();
   createClouds();
-  createHighlightSphere();
   setupLighting();
   setupControls();
   setupEventListeners();
@@ -140,14 +145,6 @@ function createClouds() {
   });
 }
 
-// ── Country highlight overlay ──────────────────────────────────────────────
-function createHighlightSphere() {
-  // A slightly larger transparent sphere used to show country highlight via a custom shader
-  // that reads from a data texture marking which country is hovered.
-  // Simpler approach: we'll just draw the highlighted country outline thicker + a fill.
-  // We'll create the highlight dynamically when a country is hovered.
-}
-
 // ── Lighting ───────────────────────────────────────────────────────────────
 function setupLighting() {
   const sun = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -178,7 +175,6 @@ async function loadCountryData() {
     const resp = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
     const world = await resp.json();
 
-    // Load topojson-client dynamically
     await loadScript('https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js');
 
     const countriesGeo = topojson.feature(world, world.objects.countries);
@@ -236,14 +232,14 @@ function patchGDP() {
     BGD:416265,PAK:348263,CHL:300742,COL:343618,CZE:290922,
     ROU:301258,NZL:247235,PER:242624,PRT:251925,FIN:282640,
     UKR:160502,KAZ:220622,HUN:188493,QAT:221369,KWT:184617,
-    SWE:585939,DNK:395404,NOR:579267,PHL:404284,
+    DNK:395404,
   };
   for (const [id, d] of Object.entries(countryData)) {
     d.gdp = gdpData[id] || 0;
   }
 }
 
-// ── Build country borders and index ────────────────────────────────────────
+// ── Build country borders and spatial grid ─────────────────────────────────
 function processGeoJsonCountries(geojson) {
   const linePoints = [];
   geoJsonFeatures = [];
@@ -257,11 +253,9 @@ function processGeoJsonCountries(geojson) {
     const coords = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
 
     for (const polygon of coords) {
-      const ring = polygon[0]; // outer ring
-      // Store polygon for point-in-polygon testing (as [lon,lat] pairs)
+      const ring = polygon[0];
       polygons.push(ring.map(c => c));
 
-      // Build border lines
       for (let i = 0; i < ring.length - 1; i++) {
         const [lon1, lat1] = ring[i];
         const [lon2, lat2] = ring[i + 1];
@@ -271,6 +265,7 @@ function processGeoJsonCountries(geojson) {
       }
     }
 
+    const featureIdx = geoJsonFeatures.length;
     geoJsonFeatures.push({ id, polygons, name: feature.properties?.name || String(id) });
   }
 
@@ -280,45 +275,88 @@ function processGeoJsonCountries(geojson) {
   const lineMat = new THREE.LineBasicMaterial({ color: 0x4d9fff, transparent: true, opacity: 0.2, depthTest: true });
   countryLinesMesh = new THREE.LineSegments(lineGeo, lineMat);
   scene.add(countryLinesMesh);
+
+  // Build spatial lookup grid
+  buildCountryGrid();
+}
+
+function buildCountryGrid() {
+  // Initialize grid: each cell stores an array of feature indices
+  // We'll rasterize each country's polygons into the grid
+  countryGrid = new Int16Array(GRID_LAT_SIZE * GRID_LON_SIZE).fill(-1);
+
+  for (let fi = 0; fi < geoJsonFeatures.length; fi++) {
+    const feature = geoJsonFeatures[fi];
+    for (const polygon of feature.polygons) {
+      rasterizePolygon(polygon, fi);
+    }
+  }
+}
+
+function rasterizePolygon(ring, featureIdx) {
+  // Find bounding box
+  let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+  for (const [lon, lat] of ring) {
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+  }
+
+  // Check for antimeridian crossing: if longitude span > 180, it wraps
+  const crossesAntimeridian = (maxLon - minLon) > 180;
+
+  const latStart = Math.max(0, Math.floor(minLat + 90));
+  const latEnd = Math.min(GRID_LAT_SIZE - 1, Math.ceil(maxLat + 90));
+  let lonStart, lonEnd;
+
+  if (crossesAntimeridian) {
+    // Polygon wraps around: test [minLon..180] and [-180..maxLon]
+    lonStart = 0;
+    lonEnd = GRID_LON_SIZE - 1;
+  } else {
+    lonStart = Math.max(0, Math.floor(minLon + 180));
+    lonEnd = Math.min(GRID_LON_SIZE - 1, Math.ceil(maxLon + 180));
+  }
+
+  for (let li = latStart; li <= latEnd; li++) {
+    for (let lo = lonStart; lo <= lonEnd; lo++) {
+      const lat = li - 90 + 0.5;
+      const lon = lo - 180 + 0.5;
+      if (countryGrid[li * GRID_LON_SIZE + lo] !== -1) continue; // already claimed
+      if (pointInPolygon(lon, lat, ring)) {
+        countryGrid[li * GRID_LON_SIZE + lo] = featureIdx;
+      }
+    }
+  }
 }
 
 // ── Point-in-polygon (ray casting) ─────────────────────────────────────────
-function pointInPolygon(lon, lat, polygon) {
+function pointInPolygon(lon, lat, ring) {
   let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
-    const intersect = ((yi > lat) !== (yj > lat)) &&
-      (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
   }
   return inside;
 }
 
 function findCountryAt(lat, lon) {
-  let best = null;
-  let bestArea = Infinity;
-  for (const feature of geoJsonFeatures) {
-    for (const polygon of feature.polygons) {
-      if (pointInPolygon(lon, lat, polygon)) {
-        const area = polygonArea(polygon);
-        if (area < bestArea) {
-          bestArea = area;
-          best = feature;
-        }
-        break; // no need to check more polygons of this feature
-      }
-    }
-  }
-  return best;
-}
+  if (!countryGrid) return null;
 
-function polygonArea(ring) {
-  let area = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    area += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
-  }
-  return Math.abs(area / 2);
+  // Snap to grid cell
+  const li = Math.round(lat + 90);
+  const lo = Math.round(lon + 180);
+
+  if (li < 0 || li >= GRID_LAT_SIZE || lo < 0 || lo >= GRID_LON_SIZE) return null;
+
+  const fi = countryGrid[li * GRID_LON_SIZE + lo];
+  if (fi === -1) return null;
+  return geoJsonFeatures[fi];
 }
 
 // ── Country highlight ──────────────────────────────────────────────────────
@@ -333,10 +371,7 @@ function highlightCountry(feature) {
   const fillVerts = [];
   const fillIndices = [];
 
-  const polygons = feature.polygons;
-
-  for (const ring of polygons) {
-    // Border lines (thicker appearance via double lines)
+  for (const ring of feature.polygons) {
     for (let i = 0; i < ring.length - 1; i++) {
       const [lon1, lat1] = ring[i];
       const [lon2, lat2] = ring[i + 1];
@@ -345,7 +380,7 @@ function highlightCountry(feature) {
       linePoints.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
     }
 
-    // Fill: create a triangle fan from centroid
+    // Fill: triangle fan from centroid
     const r = EARTH_RADIUS + 0.003;
     let cx = 0, cy = 0, cz = 0;
     const vecs = ring.map(([lon, lat]) => {
@@ -359,25 +394,21 @@ function highlightCountry(feature) {
 
     const baseIdx = fillVerts.length / 3;
     fillVerts.push(centroid.x, centroid.y, centroid.z);
-    for (const v of vecs) {
-      fillVerts.push(v.x, v.y, v.z);
-    }
+    for (const v of vecs) fillVerts.push(v.x, v.y, v.z);
     for (let i = 0; i < n; i++) {
       fillIndices.push(baseIdx, baseIdx + 1 + i, baseIdx + 1 + ((i + 1) % n));
     }
   }
 
-  // Highlight border
   if (linePoints.length > 0) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(linePoints, 3));
     highlightLineMesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
-      color: 0x4d9fff, transparent: true, opacity: 0.9, depthTest: true, linewidth: 2,
+      color: 0x4d9fff, transparent: true, opacity: 0.9, depthTest: true,
     }));
     scene.add(highlightLineMesh);
   }
 
-  // Highlight fill
   if (fillVerts.length > 0) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(fillVerts, 3));
@@ -469,7 +500,6 @@ function createFlightArcs() {
     }));
     flightGroup.add(line);
 
-    // Animated dot
     const dot = new THREE.Mesh(
       new THREE.SphereGeometry(0.004, 6, 6),
       new THREE.MeshBasicMaterial({ color: 0xffcc44 })
@@ -541,7 +571,6 @@ function onMouseMove(e) {
       highlightCountry(feature);
       showPopup(feature, e);
     } else if (feature) {
-      // Just update popup position
       positionPopup(e);
     } else {
       hoveredCountryId = null;
@@ -550,9 +579,7 @@ function onMouseMove(e) {
       renderer.domElement.style.cursor = 'grab';
     }
 
-    if (feature) {
-      renderer.domElement.style.cursor = 'pointer';
-    }
+    if (feature) renderer.domElement.style.cursor = 'pointer';
   } else {
     if (hoveredCountryId !== null) {
       hoveredCountryId = null;
