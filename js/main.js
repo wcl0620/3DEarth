@@ -296,14 +296,29 @@ function pointInPolygon(lon, lat, polygon) {
 }
 
 function findCountryAt(lat, lon) {
+  let best = null;
+  let bestArea = Infinity;
   for (const feature of geoJsonFeatures) {
     for (const polygon of feature.polygons) {
       if (pointInPolygon(lon, lat, polygon)) {
-        return feature;
+        const area = polygonArea(polygon);
+        if (area < bestArea) {
+          bestArea = area;
+          best = feature;
+        }
+        break; // no need to check more polygons of this feature
       }
     }
   }
-  return null;
+  return best;
+}
+
+function polygonArea(ring) {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return Math.abs(area / 2);
 }
 
 // ── Country highlight ──────────────────────────────────────────────────────
