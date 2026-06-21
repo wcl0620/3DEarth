@@ -684,9 +684,9 @@ function clearHighlight() {
 // ── Helpers ────────────────────────────────────────────────────────────────
 function latLonToVec3(lat, lon, radius) {
   const phi = (90 - lat) * (Math.PI / 180);
-  const theta = (lon) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
   return new THREE.Vector3(
-     radius * Math.sin(phi) * Math.cos(theta),
+    -radius * Math.sin(phi) * Math.cos(theta),
      radius * Math.cos(phi),
      radius * Math.sin(phi) * Math.sin(theta)
   );
@@ -695,7 +695,13 @@ function latLonToVec3(lat, lon, radius) {
 function vec3ToLatLon(v) {
   const r = v.length();
   const lat = 90 - Math.acos(v.y / r) * (180 / Math.PI);
-  const lon = Math.atan2(v.z, v.x) * (180 / Math.PI);
+  // Must invert: theta = (lon + 180)*PI/180, x = -r*sin(phi)*cos(theta), z = r*sin(phi)*sin(theta)
+  // atan2(z, -x) = atan2(sin(theta), cos(theta)) = theta
+  // lon = theta*180/PI - 180
+  const theta = Math.atan2(v.z, -v.x);
+  let lon = theta * (180 / Math.PI) - 180;
+  if (lon < -180) lon += 360;
+  if (lon > 180) lon -= 360;
   return { lat, lon };
 }
 
